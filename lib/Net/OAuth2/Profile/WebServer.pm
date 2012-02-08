@@ -2,10 +2,9 @@ package Net::OAuth2::Profile::WebServer;
 use warnings;
 use strict;
 use base qw(Net::OAuth2::Profile::Base);
-use JSON;
-use URI;
 use Net::OAuth2::AccessToken;
 use HTTP::Request::Common;
+require Net::OAuth2::CommonUtils;
 
 __PACKAGE__->mk_accessors(qw/redirect_uri grant_type/);
 
@@ -34,8 +33,8 @@ sub get_access_token {
   }
   my $response = $self->client->request($request);
   die "Fetch of access token failed: " . $response->status_line . ": " . $response->decoded_content unless $response->is_success;
-  my $res_params = _parse_json($response->decoded_content);
-  $res_params = _parse_query_string($response->decoded_content) unless defined $res_params;
+  my $res_params = Net::OAuth2::CommonUtils->parse_json($response->decoded_content);
+  $res_params = Net::OAuth2::CommonUtils->parse_query_string($response->decoded_content) unless defined $res_params;
   die "Unable to parse access token response '".substr($response->decoded_content, 0, 64)."'" unless defined $res_params;
   $res_params->{client} = $self->client;
   return Net::OAuth2::AccessToken->new(%$res_params);
@@ -51,19 +50,6 @@ sub access_token_params {
   # legacy for pre v2.09 (37Signals)
   $options{type} = 'web_server';
   return %options;
-}
-
-sub _parse_query_string {
-  my $str = shift;
-  my $uri = URI->new;
-  $uri->query($str);
-  return {$uri->query_form};
-}
-
-sub _parse_json {
-  my $str = shift;
-  my $obj = eval{local $SIG{__DIE__}; decode_json($str)};
-  return $obj;
 }
 
 =head1 NAME
