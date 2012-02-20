@@ -62,7 +62,7 @@ my %params = (
 my @sites = keys %expected_result;
 my $tests = 1; # no warnings;
 foreach my $site_id (@sites) {
-    $tests += @{ $expected_result{$site_id}{authorize_url} } + @{ $expected_result{$site_id}{access_token_url} } + 3;
+    $tests += @{ $expected_result{$site_id}{authorize_url} } + @{ $expected_result{$site_id}{access_token_url} } + 4;
 }
 plan tests => $tests; 
 
@@ -71,7 +71,15 @@ $mock_ua->map(qr{.*}, sub {
 # https://graph.facebook.com/oauth/access_token....
 # die $request->uri;
        my $response = HTTP::Response->new(200, 'OK');
-       if (defined $request->content and $request->content =~ /\bcode=/) {
+       my $content = $request->content;
+       if (defined $content and (
+                $content =~ /grant_type=authorization_code/
+                        and $content =~ /\bcode=/
+                or
+                $content =~ /grant_type=password/
+                        and $content =~ /password=/
+                        and $content =~ /username=/
+        )) {
          $response->add_content('access_token=abcd&token_type=bearer');
        }
        return $response;
@@ -79,6 +87,7 @@ $mock_ua->map(qr{.*}, sub {
 
 
 use Net::OAuth2::Client;
+use Net::OAuth2::Profile::Password;
 
 use Data::Dumper qw(Dumper);
 use YAML qw(LoadFile);
@@ -86,17 +95,22 @@ my $config = LoadFile('demo/config.yml');
 
 #diag Dumper $config;
 foreach my $site_id (@sites) {
-	my $authorize_url = client($site_id)->authorize_url;
+	my $authorize_url = web_server_client($site_id)->authorize_url;
         foreach my $exp (@{ $expected_result{$site_id}{authorize_url} }) {
             like ($authorize_url, qr{$exp}, "authorize_url ($exp) of $site_id");
         }
-	my $access_token_url = client($site_id)->access_token_url;
+	my $access_token_url = web_server_client($site_id)->access_token_url;
         foreach my $exp (@{ $expected_result{$site_id}{access_token_url} }) {
             like ($access_token_url, qr{$exp}, "access_token_url ($exp) of $site_id");
         }
 	my $code = "abcd";
-	my $access_token =  client($site_id)->get_access_token($code, @{$params{$site_id}});
+	my $access_token =  web_server_client($site_id)->get_access_token($code, @{$params{$site_id}});
 	isa_ok($access_token, 'Net::OAuth2::AccessToken');
+
+	my $username = my $password = "abcd";
+	$access_token =  password_client($site_id)->get_access_token( username => $username, password => $password, @{$params{$site_id}});
+	isa_ok($access_token, 'Net::OAuth2::AccessToken');
+
 #	diag $access_token->to_string;
         my $response = $access_token->get($config->{sites}{$site_id}{protected_resource_path});
 	ok($response->is_success, 'success');
@@ -116,7 +130,17 @@ sub client {
 		access_token_method => $config->{sites}{$site_id}{access_token_method},
               authorize_url => $config->{sites}{$site_id}{authorize_url},
               access_token_url => $config->{sites}{$site_id}{access_token_url},
-	)->web_server(redirect_uri => ("http://cpan.org/got/$site_id"));
+	);
+}
+
+sub web_server_client {
+	my $site_id = shift;
+	client( $site_id )->web_server(redirect_uri => ("http://cpan.org/got/$site_id"));
+}
+
+sub password_client {
+	my $site_id = shift;
+	Net::OAuth2::Profile::Password->new( client => client( $site_id ) );
 }
 
 
